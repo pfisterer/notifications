@@ -1,0 +1,340 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "notifications values",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "notifications",
+    "ingress"
+  ],
+  "properties": {
+    "global": {
+      "type": "object",
+      "description": "Injected by Helm into every subchart. Must be tolerated here, or this chart cannot be used as a dependency at all, because additionalProperties is false."
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "Dependency condition of the cloud-self-service umbrella chart. A standalone install ignores it."
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "fullnameOverride": {
+      "type": "string",
+      "description": "Pins the resource base name; the umbrella chart sets it."
+    },
+    "notifications": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "image",
+        "version",
+        "hostname",
+        "replicas",
+        "port",
+        "metricsPort",
+        "db",
+        "api",
+        "mail",
+        "roleProvider",
+        "oidc",
+        "policy"
+      ],
+      "if": {
+        "properties": {
+          "existingSecret": {
+            "const": ""
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "db": {
+            "properties": {
+              "connectionString": {
+                "minLength": 1
+              }
+            }
+          },
+          "api": {
+            "properties": {
+              "serviceTokens": {
+                "minLength": 33
+              }
+            }
+          },
+          "unsubscribeSecret": {
+            "minLength": 32
+          }
+        },
+        "required": [
+          "unsubscribeSecret"
+        ]
+      },
+      "properties": {
+        "image": {
+          "type": "string",
+          "minLength": 1
+        },
+        "imagePullPolicy": {
+          "type": "string",
+          "enum": [
+            "Always",
+            "IfNotPresent",
+            "Never"
+          ]
+        },
+        "version": {
+          "type": "string",
+          "description": "Image tag. Empty falls back to the chart appVersion."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^(sha256:[a-f0-9]{64})?$"
+        },
+        "hostname": {
+          "type": "string",
+          "minLength": 1
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "At most one: the delivery loop is not coordinated between pods."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "metricsPort": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "db": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "connectionString": {
+              "type": "string"
+            }
+          }
+        },
+        "api": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode"
+          ],
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "production",
+                "development"
+              ]
+            },
+            "serviceTokens": {
+              "type": "string",
+              "description": "name=token,… (each token at least 32 characters)"
+            },
+            "adminTokens": {
+              "type": "string"
+            }
+          }
+        },
+        "unsubscribeSecret": {
+          "type": "string"
+        },
+        "publicUrl": {
+          "type": "string",
+          "pattern": "^(https?://.+)?$"
+        },
+        "settingsUrl": {
+          "type": "string",
+          "pattern": "^(https?://.+)?$"
+        },
+        "mail": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "smtp"
+          ],
+          "if": {
+            "properties": {
+              "mode": {
+                "const": "smtp"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "smtp": {
+                "properties": {
+                  "host": {
+                    "minLength": 1
+                  },
+                  "from": {
+                    "minLength": 3
+                  }
+                }
+              }
+            }
+          },
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": [
+                "smtp",
+                "log"
+              ]
+            },
+            "smtp": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "host": {
+                  "type": "string"
+                },
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                },
+                "tls": {
+                  "type": "string",
+                  "enum": [
+                    "starttls",
+                    "tls",
+                    "none"
+                  ]
+                },
+                "username": {
+                  "type": "string"
+                },
+                "password": {
+                  "type": "string"
+                },
+                "from": {
+                  "type": "string"
+                },
+                "fromName": {
+                  "type": "string"
+                },
+                "replyTo": {
+                  "type": "string"
+                },
+                "heloName": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "roleProvider": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "token": {
+              "type": "string"
+            }
+          }
+        },
+        "oidc": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "issuerUrl": {
+              "type": "string"
+            },
+            "clientId": {
+              "type": "string"
+            },
+            "jwksUrl": {
+              "type": "string"
+            }
+          }
+        },
+        "trustedProxies": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "timezone": {
+              "type": "string",
+              "minLength": 1
+            },
+            "bundleCollectSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "bundleWindowMinutes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "dailyLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "urgentWithinHours": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "reminderDays": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "maxItems": 5
+            },
+            "digestHour": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 23
+            },
+            "retentionDays": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "passIntervalSeconds": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "ingress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "className": {
+          "type": "string"
+        },
+        "annotations": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

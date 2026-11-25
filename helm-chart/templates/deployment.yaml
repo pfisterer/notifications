@@ -1,0 +1,247 @@
+{{- $name := include "notifications.fullname" . -}}
+{{- $v := .Values.notifications -}}
+{{- $secretName := default $name $v.existingSecret -}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    {{- include "notifications.rolloutAnnotations" . | nindent 4 }}
+    # Restart this Deployment when the referenced Secret changes (Stakater Reloader)
+    secret.reloader.stakater.com/reload: {{ $secretName }}
+  labels:
+    {{- include "notifications.labels" . | nindent 4 }}
+spec:
+  replicas: {{ $v.replicas }}
+  # Recreate: the delivery loop must never run twice at once, not even during a rollout.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "notifications.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- include "notifications.rolloutAnnotations" . | nindent 8 }}
+      labels:
+        {{- include "notifications.selectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      containers:
+        - name: notifications
+          # The tag falls back to this chart's appVersion, so a pinned chart version pins the image too.
+          image: {{ $v.image }}:{{ $v.version | default .Chart.AppVersion }}{{ with $v.digest }}@{{ . }}{{ end }}
+          imagePullPolicy: {{ $v.imagePullPolicy | default "Always" }}
+          ports:
+            - name: http
+              containerPort: {{ $v.port }}
+            - name: metrics
+              containerPort: {{ $v.metricsPort }}
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+            seccompProfile:
+              type: RuntimeDefault
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "20m"
+              memory: "48Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+          env:
+            - name: API_BIND
+              value: ":{{ $v.port }}"
+            - name: METRICS_BIND
+              value: ":{{ $v.metricsPort }}"
+            - name: API_MODE
+              value: {{ $v.api.mode | quote }}
+            - name: DB_CONNECTION_STRING
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: db-connection-string
+            # name=token,… — one per sending service.
+            - name: NOTIFY_SERVICE_TOKENS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: service-tokens
+            - name: NOTIFY_ADMIN_TOKENS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: admin-tokens
+                  optional: true
+            - name: UNSUBSCRIBE_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: unsubscribe-secret
+            - name: PUBLIC_URL
+              value: {{ $v.publicUrl | default (printf "https://%s" $v.hostname) | quote }}
+            - name: SETTINGS_URL
+              value: {{ $v.settingsUrl | quote }}
+            # ── Mail ─────────────────────────────────────────────────────────
+            - name: MAIL_MODE
+              value: {{ $v.mail.mode | quote }}
+            {{- with $v.mail.smtp }}
+            - name: SMTP_HOST
+              value: {{ .host | quote }}
+            - name: SMTP_PORT
+              value: {{ .port | toString | quote }}
+            - name: SMTP_TLS
+              value: {{ .tls | quote }}
+            - name: SMTP_USERNAME
+              value: {{ .username | quote }}
+            - name: SMTP_FROM
+              value: {{ .from | quote }}
+            - name: SMTP_FROM_NAME
+              value: {{ .fromName | quote }}
+            - name: SMTP_REPLY_TO
+              value: {{ .replyTo | quote }}
+            - name: SMTP_HELO_NAME
+              value: {{ .heloName | quote }}
+            {{- end }}
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: smtp-password
+                  optional: true
+            # ── Role provider (group recipients) ─────────────────────────────
+            - name: ROLE_PROVIDER_URL
+              value: {{ $v.roleProvider.url | quote }}
+            - name: ROLE_PROVIDER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretName }}
+                  key: role-provider-token
+                  optional: true
+            {{- with $v.oidc }}
+            {{- if .issuerUrl }}
+            # ── The portal's sign-in ─────────────────────────────────────────
+            - name: OIDC_ISSUER_URL
+              value: {{ .issuerUrl | quote }}
+            - name: OIDC_CLIENT_ID
+              value: {{ .clientId | quote }}
+            - name: OIDC_JWKS_URL
+              value: {{ .jwksUrl | default "" | quote }}
+            {{- end }}
+            {{- end }}
+            - name: TRUSTED_PROXIES
+              value: {{ join "," ($v.trustedProxies | default list) | quote }}
+            # ── Rules ────────────────────────────────────────────────────────
+            {{- with $v.policy }}
+            - name: TIMEZONE
+              value: {{ .timezone | quote }}
+            - name: BUNDLE_COLLECT_SECONDS
+              value: {{ .bundleCollectSeconds | toString | quote }}
+            - name: BUNDLE_WINDOW_MINUTES
+              value: {{ .bundleWindowMinutes | toString | quote }}
+            - name: DAILY_LIMIT
+              value: {{ .dailyLimit | toString | quote }}
+            - name: URGENT_WITHIN_HOURS
+              value: {{ .urgentWithinHours | toString | quote }}
+            - name: REMINDER_DAYS
+              value: {{ join "," .reminderDays | quote }}
+            - name: DIGEST_HOUR
+              value: {{ .digestHour | toString | quote }}
+            - name: RETENTION_DAYS
+              value: {{ .retentionDays | toString | quote }}
+            - name: PASS_INTERVAL_SECONDS
+              value: {{ .passIntervalSeconds | toString | quote }}
+            {{- end }}
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "notifications.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "notifications.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      protocol: TCP
+      port: {{ $v.port }}
+      targetPort: http
+    - name: metrics
+      protocol: TCP
+      port: {{ $v.metricsPort }}
+      targetPort: metrics
+
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    {{- range $key, $value := .Values.ingress.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  rules:
+    - host: {{ $v.hostname | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  name: http
+  tls:
+    - hosts:
+        - {{ $v.hostname | quote }}
+{{- end }}
+{{- if not $v.existingSecret }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "notifications.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  db-connection-string: {{ $v.db.connectionString | quote }}
+  service-tokens: {{ $v.api.serviceTokens | quote }}
+  admin-tokens: {{ $v.api.adminTokens | default "" | quote }}
+  unsubscribe-secret: {{ $v.unsubscribeSecret | quote }}
+  role-provider-token: {{ $v.roleProvider.token | default "" | quote }}
+  smtp-password: {{ $v.mail.smtp.password | default "" | quote }}
+{{- end }}

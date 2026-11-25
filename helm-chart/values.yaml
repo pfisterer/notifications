@@ -1,0 +1,88 @@
+# Dependency condition of the cloud-self-service umbrella chart, which decides by this key whether to install this chart at all (there it defaults to false). Set it there, not here: a standalone `helm install` of this chart ignores it entirely.
+enabled: true
+
+notifications:
+  image: ghcr.io/pfisterer/notifications
+  imagePullPolicy: Always
+  # Empty -> the chart's appVersion is used (see the deployment template).
+  version: ""
+  # Optional image digest, e.g. digest: "sha256:<64 hex>": the image is then pulled as <image>:<version>@<digest>.
+  # digest: ""
+  # Public host name: the unsubscribe links in the mails point here, so it has to be reachable without signing in.
+  hostname: "notifications.example.com"
+  # One replica only: the delivery loop is not coordinated between pods, two would send every mail twice.
+  replicas: 1
+  port: 8087
+  # /metrics, on a port of its own that the Ingress does not expose.
+  metricsPort: 8088
+
+  # Name of an existing Secret with the keys db-connection-string, service-tokens, unsubscribe-secret and optionally admin-tokens, role-provider-token, smtp-password. When set, the chart creates no Secret and the secret values below are ignored.
+  existingSecret: ""
+
+  db:
+    # PostgreSQL DSN. Used only when the chart creates its own Secret.
+    connectionString: ""
+
+  api:
+    mode: "production"
+    # Service tokens, "name=token,name=token": one per service that posts events, the name is how the service is recognised (and the scope of its event keys). Each token at least 32 characters. Used only when the chart creates its own Secret.
+    serviceTokens: ""
+    # Admin tokens (comma-separated) for /v1/admin: trigger a delivery pass or the summaries. Empty = none.
+    adminTokens: ""
+
+  # Signs the unsubscribe links (at least 32 characters). Changing it invalidates the links in every mail sent so far. Used only when the chart creates its own Secret.
+  unsubscribeSecret: ""
+  # Where the unsubscribe links point; empty -> https://<hostname>.
+  publicUrl: ""
+  # The portal's notification settings page, linked in every mail.
+  settingsUrl: ""
+
+  mail:
+    # smtp sends; log only writes what would be sent into the log.
+    mode: "smtp"
+    smtp:
+      host: ""
+      port: 25
+      # starttls (used when offered, required with a login), tls (implicit, 465) or none.
+      tls: "starttls"
+      # Login, if the server wants one; the password comes from the Secret (smtp-password).
+      username: ""
+      password: ""
+      # Sender address and display name, and where answers go.
+      from: ""
+      fromName: "DHBW Cloud"
+      replyTo: ""
+      # Name in EHLO; empty -> localhost.
+      heloName: ""
+
+  # The role provider resolves group recipients. The token (a resolve or read token there) comes from the Secret (role-provider-token). Empty url: events naming a group wait.
+  roleProvider:
+    url: ""
+    token: ""
+
+  # Identity provider of the portal: its ID tokens (forwarded by the portal's proxy) authenticate /v1/preferences and /v1/notifications. Empty issuerUrl leaves those routes out.
+  oidc:
+    issuerUrl: ""
+    clientId: ""
+    jwksUrl: ""
+
+  # Reverse proxies whose X-Forwarded-For is believed for the client address in the logs.
+  trustedProxies: []
+
+  # The rules against flooding people with mail (README, "Rules").
+  policy:
+    timezone: "Europe/Berlin"
+    bundleCollectSeconds: 120
+    bundleWindowMinutes: 15
+    dailyLimit: 5
+    urgentWithinHours: 48
+    reminderDays: [2, 7]
+    digestHour: 8
+    retentionDays: 90
+    passIntervalSeconds: 30
+
+ingress:
+  enabled: true
+  # Empty className -> field omitted -> cluster default IngressClass.
+  className: ""
+  annotations: {}

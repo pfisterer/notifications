@@ -1,0 +1,208 @@
+name: Docker Image CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+# One run per branch at a time: GitHub has started two runs for the same push, and the second one failed on creating the release tag the first had just pushed. Waiting (never cancelling) lets the second see the tag and skip.
+concurrency:
+  group: docker-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      # write: the release step below creates a tag and a GitHub release.
+      contents: write
+      packages: write
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          # Full history: the release notes are derived from the commits since
+          # the previous tag, and a shallow clone has neither.
+          fetch-depth: 0
+
+      - name: Read version from VERSION file
+        id: get_version
+        run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_OUTPUT"
+
+      # Chart.yaml must state the same version as the source of truth above.
+      # Deliberately a check, not a fix-up: a workflow that silently rewrote the
+      # file would leave the repository wrong and hide the omission. It runs
+      # before the build so a mismatch costs nothing but a red run.
+      - name: Check the chart version matches
+        run: make version-check
+
+      # The OpenAPI description is generated and gitignored; it rides along with each stable release as an asset, so a consumer can pin the API by version. Only for stable versions, because only those get a release to attach it to.
+      - name: Set up Go
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(steps.get_version.outputs.VERSION, '-')
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Generate the OpenAPI description for the release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(steps.get_version.outputs.VERSION, '-')
+        run: make generate-docs
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }} # The GitHub user that triggered the workflow
+          password: ${{ secrets.GITHUB_TOKEN }} # The special GitHub token for workflows
+
+      # The same invariant the chart step below already enforces, asked the same
+      # way: of the registry, not of the diff. Without it every push to main
+      # rebuilt ghcr.io/…:$VERSION and silently replaced the contents of a tag
+      # that production is running — the pod keeps going, but the next restart or
+      # rescheduling pulls different code under the same number.
+      #
+      # The build itself still runs, so a broken Dockerfile is caught on the
+      # commit that broke it. Only the push is withheld.
+      - name: Check whether this image version is already published
+        id: image_published
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}"
+          VERSION="${{ steps.get_version.outputs.VERSION }}"
+          if docker buildx imagetools inspect "$IMAGE:$VERSION" >/dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$IMAGE:$VERSION is already published — building to verify, not pushing. Bump VERSION to release."
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          # Never on a pull request either: that pushed to the registry too, and
+          # a PR is by definition not a release.
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.image_published.outputs.published != 'true' }}
+          # amd64 only — the k3s nodes are x86_64; the emulated arm64 build is unnecessary overhead.
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.get_version.outputs.VERSION }}
+            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # --- chart artifact ---
+      # The chart goes to the same registry as the image, under
+      # ghcr.io/<owner>/charts/<chart-name>, versioned by Chart.yaml — which the
+      # check at the top of this job guarantees agrees with the source of truth.
+      # That guarantee is the point: here the number stops being a label and
+      # becomes the artifact's identity.
+      #
+      # Prereleases are pushed too, so staging can consume charts the same way
+      # production will rather than staying a special case. This is additive:
+      # Argo CD still pulls the chart from the Git path, so nothing about the
+      # deployment changes until the umbrella chart starts consuming these.
+      - name: Set up Helm
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+
+      - name: Package and push the Helm chart
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "$GH_TOKEN" | helm registry login ghcr.io \
+            -u "${{ github.actor }}" --password-stdin
+          # An already published version is never overwritten. The question is
+          # asked of the registry rather than of the diff: "has this version been
+          # published" is the invariant that matters, and a paths filter would
+          # only answer "did this file change".
+          NAME=$(awk '/^name:/{print $2; exit}' helm-chart/Chart.yaml)
+          VERSION=$(awk '/^version:/{print $2; exit}' helm-chart/Chart.yaml)
+          if helm show chart "oci://ghcr.io/${{ github.repository_owner }}/charts/$NAME" \
+               --version "$VERSION" >/dev/null 2>&1; then
+            echo "$NAME $VERSION is already published - nothing to do."
+            exit 0
+          fi
+
+          helm package helm-chart/ --destination "$RUNNER_TEMP"
+          helm push "$RUNNER_TEMP"/*.tgz \
+            "oci://ghcr.io/${{ github.repository_owner }}/charts"
+
+      # --- release ---
+      # A stable VERSION gets a Git tag and a GitHub release; a "-test.N" one
+      # deliberately gets neither. That omission is the whole mechanism: Argo CD
+      # pulls this repo's Helm chart, and production resolves it against tags,
+      # so an untagged commit simply does not exist for production.
+      - name: Tag and release stable versions
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(steps.get_version.outputs.VERSION, '-')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          set -euo pipefail
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "v$VERSION is already tagged — nothing to release."
+            exit 0
+          fi
+          # The commit subjects are the changelog; they are already written as
+          # one. Only the "release X.Y.Z" bumps say nothing worth reading.
+          NOTES="$RUNNER_TEMP/notes.md"
+          PREV=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)
+          RANGE=HEAD
+          [ -n "$PREV" ] && RANGE="$PREV..HEAD"
+          git log --pretty=%s "$RANGE" | grep -v '^release ' |
+            awk -F': ' '{ line = $0; g = "zz-other";
+                          # Only a bare lowercase word counts as a topic prefix.
+                          # Without that test, `Revert "nodes: ..."` splits at its
+                          # own colon and invents the group `Revert "nodes`.
+                          if (NF > 1 && $1 ~ /^[a-z0-9._-]+$/) { g = $1; sub(/^[^:]*: /, "", line) }
+                          printf "%s\t%s\n", g, line }' |
+            sort -s -t "$(printf '\t')" -k1,1 |
+            awk -F'\t' '{ g = $1; sub(/^zz-/, "", g);   # sorts ungrouped ones last
+                          if (g != last) { printf "\n**%s**\n", g; last = g }
+                          printf "- %s\n", $2 }' > "$NOTES" || true
+          [ -s "$NOTES" ] || echo "Maintenance release." > "$NOTES"
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+          # swagger.json rides along as an asset so consumers can pin this
+          # API by version instead of reaching into a checkout. See the
+          # generate step above for why.
+          gh release create "v$VERSION" --title "v$VERSION" --notes-file "$NOTES" \
+            internal/generated_docs/swagger.json
+
+      # --- ghcr retention (runs after the push, so counts include the new tag) ---
+      # Keep only the newest pre-release "-test.N" tag
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          use-regex: true
+          exclude-tags: '^latest$'
+          delete-tags: '^\d+\.\d+\.\d+-test\.\d+$'
+          keep-n-tagged: 1
+      # Keep the newest 3 stable semver tags (X.Y.Z)
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          use-regex: true
+          exclude-tags: '^latest$'
+          delete-tags: '^v?\d+\.\d+\.\d+$'
+          keep-n-tagged: 3
+      # Delete all old pre-release "-alpha" tags
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          use-regex: true
+          delete-tags: '^.*-alpha$'
+      # Clean up untagged / ghost / orphaned leftovers
+      - uses: dataaxiom/ghcr-cleanup-action@d52806a0dc70b430571a37da1fde39733ffd640f # v1.2.2
+        with:
+          delete-untagged: true
+          delete-ghost-images: true
+          delete-orphaned-images: true
