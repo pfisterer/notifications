@@ -71,7 +71,7 @@ func SetupRouter(cfg Config) (*gin.Engine, error) {
 
 	r.GET("/", func(c *gin.Context) {
 		c.Header("Content-Type", "text/html; charset=utf-8")
-		c.String(http.StatusOK, strings.ReplaceAll(indexHTML, "__VERSION__", generated_docs.Version))
+		c.String(http.StatusOK, strings.ReplaceAll(indexHTML, "__VERSION__", appVersion))
 	})
 	r.GET("/swagger.json", func(c *gin.Context) {
 		c.Header("Content-Type", "application/json; charset=utf-8")
