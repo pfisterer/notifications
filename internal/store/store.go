@@ -398,3 +398,33 @@ func (s *Store) DeleteBefore(ctx context.Context, t time.Time) (int64, error) {
 	})
 	return n, err
 }
+
+// passLockKey is the PostgreSQL advisory lock that makes the delivery pass a single one across pods (an arbitrary constant, "nots" in ASCII).
+const passLockKey = 0x6e6f7473
+
+// TryPassLock takes the lock one delivery pass holds, so two pods never deliver at once: during a rolling update the old and the new pod run side by side for a moment. ok is false when another pod holds it (skip this pass). On PostgreSQL a session advisory lock on a connection of its own, released by release; on other databases (SQLite in tests and development, one process) it is always granted.
+func (s *Store) TryPassLock(ctx context.Context) (release func(), ok bool, err error) {
+	if s.db.Dialector.Name() != "postgres" {
+		return func() {}, true, nil
+	}
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return nil, false, err
+	}
+	conn, err := sqlDB.Conn(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", passLockKey).Scan(&ok); err != nil {
+		conn.Close()
+		return nil, false, err
+	}
+	if !ok {
+		conn.Close()
+		return nil, false, nil
+	}
+	return func() {
+		_, _ = conn.ExecContext(context.Background(), "SELECT pg_advisory_unlock($1)", passLockKey)
+		conn.Close()
+	}, true, nil
+}

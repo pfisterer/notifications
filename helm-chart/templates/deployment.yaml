@@ -15,9 +15,12 @@ metadata:
     {{- include "notifications.labels" . | nindent 4 }}
 spec:
   replicas: {{ $v.replicas }}
-  # Recreate: the delivery loop must never run twice at once, not even during a rollout.
+  # A rollout without a gap: the new pod first, the old one only once the new one is ready (the delivery pass is single across pods through a PostgreSQL advisory lock, store.TryPassLock, so the overlap is safe; one replica: the defaults would round to the same, stated so it does not depend on rounding).
   strategy:
-    type: Recreate
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       {{- include "notifications.selectorLabels" . | nindent 6 }}
@@ -29,6 +32,8 @@ spec:
         {{- include "notifications.selectorLabels" . | nindent 8 }}
     spec:
       automountServiceAccountToken: false
+      # preStop pause (5 s) + the server's own drain after SIGTERM (20 s, ginweb.ShutdownGrace) fit in here.
+      terminationGracePeriodSeconds: 30
       volumes:
         - name: tmp
           emptyDir: {}
@@ -42,6 +47,11 @@ spec:
               containerPort: {{ $v.port }}
             - name: metrics
               containerPort: {{ $v.metricsPort }}
+          # Wait before SIGTERM until the pod is out of the Service's endpoints, so no request is still routed to a process that is stopping; then the server answers what is in flight and ends (25.11.2026 the portal logged "connection refused" during a rollout).
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: 5
           securityContext:
             runAsNonRoot: true
             runAsUser: 65532

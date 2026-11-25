@@ -166,6 +166,16 @@ func (e *Engine) Pass(ctx context.Context) error {
 	e.init()
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	// One pass across all pods: a rolling update runs the old and the new pod side by side for a moment, and both must not deliver the same mails.
+	release, ok, err := e.Store.TryPassLock(ctx)
+	if err != nil {
+		return fmt.Errorf("pass lock: %w", err)
+	}
+	if !ok {
+		e.Log.Debugw("another pod is delivering, pass skipped")
+		return nil
+	}
+	defer release()
 	var errs []error
 	for _, step := range []struct {
 		name string

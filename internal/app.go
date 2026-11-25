@@ -109,18 +109,15 @@ func Run() {
 			log.Errorw("metrics server stopped", "error", err)
 		}
 	}()
-	srv := &http.Server{Addr: cfg.Bind, Handler: router, ReadHeaderTimeout: 10 * time.Second}
-	go func() {
-		<-ctx.Done()
-		shutdown, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutdown)
-		_ = metricsSrv.Shutdown(shutdown)
-	}()
+	// The API drains on SIGTERM (ginweb.ServeUntil, up to ginweb.ShutdownGrace): events a service posts during a rollout are answered, not refused. The metrics server goes after it.
+	srv := ginweb.NewServer(cfg.Bind, router)
 	log.Infow("Listening", "bind", cfg.Bind, "metrics", cfg.MetricsBind)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := ginweb.ServeUntil(ctx, srv, ginweb.ShutdownGrace); err != nil {
 		log.Fatalw("server stopped", "error", err)
 	}
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = metricsSrv.Shutdown(shutdown)
 }
 
 func openDB(dsn string) (*gorm.DB, error) {
