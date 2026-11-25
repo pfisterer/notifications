@@ -31,6 +31,8 @@ type Config struct {
 	PublicURL string
 	// SettingsURL is the portal's notification settings page (SETTINGS_URL).
 	SettingsURL string
+	// PortalURL is the portal (PORTAL_URL), for links to objects sent without a url.
+	PortalURL string
 	// MailMode is smtp or log (MAIL_MODE): log only writes what would be sent.
 	MailMode string
 	SMTP     mail.SMTPConfig
@@ -67,6 +69,7 @@ func loadConfig() (Config, error) {
 		UnsubscribeSecret:  envconf.String("UNSUBSCRIBE_SECRET", ""),
 		PublicURL:          strings.TrimRight(envconf.String("PUBLIC_URL", ""), "/"),
 		SettingsURL:        envconf.String("SETTINGS_URL", ""),
+		PortalURL:          strings.TrimRight(envconf.String("PORTAL_URL", ""), "/"),
 		MailMode:           envconf.String("MAIL_MODE", "smtp"),
 		SMTP: mail.SMTPConfig{
 			Host:     envconf.String("SMTP_HOST", ""),
@@ -114,7 +117,6 @@ func loadConfig() (Config, error) {
 	p.BundleCollect = time.Duration(envconf.Int("BUNDLE_COLLECT_SECONDS", int(p.BundleCollect/time.Second))) * time.Second
 	p.BundleWindow = time.Duration(envconf.Int("BUNDLE_WINDOW_MINUTES", int(p.BundleWindow/time.Minute))) * time.Minute
 	p.DailyLimit = envconf.Int("DAILY_LIMIT", p.DailyLimit)
-	p.UrgentWithin = time.Duration(envconf.Int("URGENT_WITHIN_HOURS", int(p.UrgentWithin/time.Hour))) * time.Hour
 	p.DigestHour = envconf.Int("DIGEST_HOUR", p.DigestHour)
 	p.Retention = time.Duration(envconf.Int("RETENTION_DAYS", int(p.Retention/(24*time.Hour)))) * 24 * time.Hour
 	if days := envconf.StringSlice("REMINDER_DAYS", nil); len(days) > 0 {

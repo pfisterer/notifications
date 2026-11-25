@@ -220,58 +220,17 @@ func TestDailyLimitMovesTheRestToTheSummary(t *testing.T) {
 	h.wantMails(alice, 7)
 }
 
-func TestQuietHours(t *testing.T) {
-	h := newHarness(t, at(25, 22, 0)) // Wednesday night
-	h.post("os", action("approval.waiting", "q1", alice))
-	h.advance(h.e.Policy.BundleCollect)
-	h.pass()
-	h.wantMails(alice, 0)
-	if h.e.Metrics.Deferred.Value("quiet_hours") != 1 {
-		t.Errorf("deferred metric %v", h.e.Metrics.Deferred.Value("quiet_hours"))
+// There are no quiet hours: a mail at night or on the weekend goes out as soon as it is due.
+func TestNoQuietHours(t *testing.T) {
+	for name, start := range map[string]time.Time{"night": at(25, 23, 0), "saturday": at(28, 11, 0)} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t, start)
+			h.post("os", action("approval.waiting", "n1", alice))
+			h.advance(h.e.Policy.BundleCollect)
+			h.pass()
+			h.wantMails(alice, 1)
+		})
 	}
-	h.setTime(at(26, 6, 59))
-	h.pass()
-	h.wantMails(alice, 0)
-	h.setTime(at(26, 7, 0))
-	h.pass()
-	h.wantMails(alice, 1)
-
-	// A deadline within 48 hours is delivered at night anyway.
-	h.setTime(at(26, 23, 0))
-	urgent := action("project.ending", "q2", bob)
-	due := h.now.Add(30 * time.Hour)
-	urgent.Due = &due
-	h.post("os", urgent)
-	h.advance(h.e.Policy.BundleCollect)
-	h.pass()
-	h.wantMails(bob, 1)
-	h.post("os", model.EventRequest{Type: "project.ending", Key: "q2", Resolve: true})
-
-	// The weekend lasts until Monday morning.
-	h.setTime(at(28, 11, 0)) // Saturday
-	h.post("os", action("approval.waiting", "q3", bob))
-	h.advance(h.e.Policy.BundleCollect)
-	h.pass()
-	h.wantMails(bob, 1)
-	h.setTime(at(30, 6, 30)) // Monday, still night
-	h.pass()
-	h.wantMails(bob, 1)
-	h.setTime(at(30, 7, 0))
-	h.pass()
-	h.wantMails(bob, 2)
-}
-
-func TestQuietHoursCanBeSwitchedOff(t *testing.T) {
-	h := newHarness(t, at(25, 23, 0))
-	p := model.DefaultPreferences()
-	p.QuietHours.Enabled = false
-	if err := h.e.Store.SavePreferences(h.ctx, alice, p, h.now); err != nil {
-		t.Fatal(err)
-	}
-	h.post("os", action("approval.waiting", "n1", alice))
-	h.advance(h.e.Policy.BundleCollect)
-	h.pass()
-	h.wantMails(alice, 1)
 }
 
 func TestRemindersForOpenActions(t *testing.T) {
@@ -505,3 +464,18 @@ func TestGroupResolutionFailureWaits(t *testing.T) {
 type failing struct{}
 
 func (failing) Members(context.Context, string) ([]string, error) { return nil, fmt.Errorf("down") }
+
+func TestObjectsWithoutURLGetThePortalLink(t *testing.T) {
+	l := Links{PortalURL: "https://portal.example.edu/"}
+	for kind, want := range map[string]string{"project": "https://portal.example.edu/projects?project=p_1", "budget": "https://portal.example.edu/projects?budget=p_1", "allocation": "https://portal.example.edu/projects?node=p_1"} {
+		if got := l.Complete(model.Object{Kind: kind, ID: "p_1"}).URL; got != want {
+			t.Errorf("%s: %s", kind, got)
+		}
+	}
+	if got := l.Complete(model.Object{Kind: "project", ID: "p_1", URL: "https://elsewhere.example.edu/x"}).URL; got != "https://elsewhere.example.edu/x" {
+		t.Errorf("a given url is kept: %s", got)
+	}
+	if got := (Links{}).Complete(model.Object{Kind: "project", ID: "p_1"}).URL; got != "" {
+		t.Errorf("without a portal no link: %s", got)
+	}
+}

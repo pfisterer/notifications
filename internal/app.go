@@ -74,7 +74,7 @@ func Run() {
 
 	eng := &engine.Engine{
 		Store: st, Deliverer: deliverer, Resolver: resolver, Signer: signer, Policy: cfg.Policy,
-		Links:   engine.Links{SettingsURL: cfg.SettingsURL, PublicURL: cfg.PublicURL},
+		Links:   engine.Links{SettingsURL: cfg.SettingsURL, PublicURL: cfg.PublicURL, PortalURL: cfg.PortalURL},
 		Metrics: engine.NewMetrics(), Log: log,
 	}
 

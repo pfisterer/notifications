@@ -289,10 +289,6 @@
               "type": "integer",
               "minimum": 0
             },
-            "urgentWithinHours": {
-              "type": "integer",
-              "minimum": 0
-            },
             "reminderDays": {
               "type": "array",
               "items": {
@@ -315,6 +311,10 @@
               "minimum": 1
             }
           }
+        },
+        "portalUrl": {
+          "type": "string",
+          "pattern": "^(https?://.+)?$"
         }
       }
     },

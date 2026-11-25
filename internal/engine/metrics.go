@@ -30,7 +30,7 @@ func NewMetrics() *Metrics {
 		Messages:   promtext.NewCounterVec("notify_messages_total", "Messages (mails) sent, by channel and kind.", "channel", "kind"),
 		Bundled:    promtext.NewCounterVec("notify_bundled_total", "Notifications that went out in one immediate message together with others of their type (n-1 per message).", "channel"),
 		Suppressed: promtext.NewCounterVec("notify_suppressed_total", "Notifications or events not delivered on purpose, by reason (duplicate, own_action, resolved, unsubscribed, off, no_recipient).", "reason"),
-		Deferred:   promtext.NewCounterVec("notify_deferred_total", "Immediate notifications held back or moved to the summary, by reason (quiet_hours, daily_limit).", "reason"),
+		Deferred:   promtext.NewCounterVec("notify_deferred_total", "Immediate notifications moved to the summary, by reason (daily_limit).", "reason"),
 		Failed:     promtext.NewCounterVec("notify_failed_total", "Failures, by stage (send: one attempt; gave_up: a notification given up after every attempt; resolve: a group could not be resolved).", "stage"),
 		Panics:     promtext.NewCounterVec("notify_loop_panics_total", "Recovered panics of the delivery loop.", "loop"),
 	}
@@ -42,7 +42,6 @@ func NewMetrics() *Metrics {
 	for _, r := range []string{"duplicate", "own_action", "resolved", "unsubscribed", "off"} {
 		m.Suppressed.Init(r)
 	}
-	m.Deferred.Init("quiet_hours")
 	m.Deferred.Init("daily_limit")
 	for _, s := range []string{"send", "gave_up", "resolve"} {
 		m.Failed.Init(s)

@@ -15,7 +15,7 @@ import (
 
 // Status of a notification.
 const (
-	// StatusPending waits for immediate delivery (bundling, quiet hours, a retry).
+	// StatusPending waits for immediate delivery (bundling, a retry).
 	StatusPending = "pending"
 	// StatusDigest waits for the person's next summary.
 	StatusDigest = "digest"
@@ -81,10 +81,10 @@ type Notification struct {
 	// Reminder is 0 for the notification itself, 1 and 2 for the reminders of it.
 	Reminder int    `gorm:"not null;default:0"`
 	Status   string `gorm:"size:20;not null;index:idx_notif_recipient_status,priority:2;index"`
-	// Reason says why a notification was suppressed or went to the summary instead (quiet_hours, daily_limit, preference, unsubscribed, off, resolved, own_action, ...).
+	// Reason says why a notification was suppressed or went to the summary instead (daily_limit, preference, unsubscribed, off, resolved, own_action, ...).
 	Reason    string    `gorm:"size:40"`
 	CreatedAt time.Time `gorm:"not null;index"`
-	// NotBefore holds a pending notification back (quiet hours, a retry after a failed send).
+	// NotBefore holds a pending notification back (a retry after a failed send).
 	NotBefore *time.Time
 	SentAt    *time.Time
 	MailID    *uint64
@@ -128,6 +128,10 @@ func New(db *gorm.DB) (*Store, error) {
 	// One open event per sender and key; a resolved one no longer blocks the key. A partial index, which both PostgreSQL and SQLite know.
 	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_events_open_key ON events (sender, key) WHERE resolved_at IS NULL").Error; err != nil {
 		return nil, fmt.Errorf("index: %w", err)
+	}
+	// Quiet hours are gone (0.1.0-test.2): what they held back goes out now instead of at the end of the night.
+	if err := db.Exec("UPDATE notifications SET not_before = NULL, reason = '' WHERE status = ? AND reason = ?", StatusPending, "quiet_hours").Error; err != nil {
+		return nil, fmt.Errorf("release quiet-hours holds: %w", err)
 	}
 	return &Store{db: db}, nil
 }
@@ -237,15 +241,6 @@ func (s *Store) SetStatus(ctx context.Context, ids []uint64, status, reason stri
 	}
 	return s.db.WithContext(ctx).Model(&Notification{}).Where("id IN ?", ids).
 		Updates(map[string]any{"status": status, "reason": reason}).Error
-}
-
-// HoldUntil keeps the pending notifications ids back until t.
-func (s *Store) HoldUntil(ctx context.Context, ids []uint64, t time.Time, reason string) error {
-	if len(ids) == 0 {
-		return nil
-	}
-	return s.db.WithContext(ctx).Model(&Notification{}).Where("id IN ?", ids).
-		Updates(map[string]any{"not_before": t, "reason": reason}).Error
 }
 
 // RecordFailure counts a failed attempt on ids: held back until retryAt, or failed for good after maxAttempts.

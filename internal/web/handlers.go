@@ -78,7 +78,7 @@ type PreferencesResponse struct {
 // getPreferences godoc
 //
 //	@Summary		Own notification settings
-//	@Description	The settings of the person signed in, or the defaults when they have saved none (action and disruption at once, info in a weekly summary, quiet at night and on weekends).
+//	@Description	The settings of the person signed in, or the defaults when they have saved none (action and disruption at once, info in a weekly summary).
 //	@Tags			preferences
 //	@Produce		json
 //	@Security		Bearer
@@ -215,7 +215,7 @@ func (h *handlers) getNotifications(c *gin.Context) {
 		v := texts.View{Type: n.Type, Reminder: n.Reminder, Loc: h.cfg.Engine.Policy.Location}
 		open := true
 		if n.Event != nil {
-			v.Object, v.Data, v.Due = n.Event.ObjectValue(), n.Event.DataValue(), n.Event.Due
+			v.Object, v.Data, v.Due = h.cfg.Engine.Links.Complete(n.Event.ObjectValue()), n.Event.DataValue(), n.Event.Due
 			open = n.Event.ResolvedAt == nil
 		}
 		it := texts.Render(v, l)
@@ -234,7 +234,7 @@ func langOf(c *gin.Context) texts.Lang {
 // adminPass godoc
 //
 //	@Summary		Run a delivery pass now
-//	@Description	Fans out new events, queues due reminders and delivers what is due, without waiting for the next tick. The rules (bundling, quiet hours, limits) apply as always.
+//	@Description	Fans out new events, queues due reminders and delivers what is due, without waiting for the next tick. The rules (bundling, limits) apply as always.
 //	@Tags			admin
 //	@Produce		json
 //	@Security		Bearer

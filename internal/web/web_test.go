@@ -188,13 +188,13 @@ func TestPreferences(t *testing.T) {
 	if !got.IsDefault || got.Recipient != person || got.ModeOf(model.ClassInfo) != model.ModeDigest || got.Digest != model.DigestWeekly {
 		t.Fatalf("defaults: %+v", got)
 	}
-	w = v.do("PUT", "/v1/preferences", "", `{"language":"en","classes":{"info":"off"},"digest":"daily","quiet_hours":{"enabled":false},"unsubscribed":["project.ending"]}`)
+	w = v.do("PUT", "/v1/preferences", "", `{"language":"en","classes":{"info":"off"},"digest":"daily","unsubscribed":["project.ending"]}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("put: %d %s", w.Code, w.Body)
 	}
 	w = v.do("GET", "/v1/preferences", "", "")
 	_ = json.Unmarshal(w.Body.Bytes(), &got)
-	if got.IsDefault || got.Language != "en" || got.ModeOf(model.ClassInfo) != model.ModeOff || got.ModeOf(model.ClassAction) != model.ModeImmediate || got.QuietHours.Enabled || got.QuietHours.Start != "20:00" {
+	if got.IsDefault || got.Language != "en" || got.ModeOf(model.ClassInfo) != model.ModeOff || got.ModeOf(model.ClassAction) != model.ModeImmediate {
 		t.Fatalf("saved: %+v", got)
 	}
 	if w := v.do("PUT", "/v1/preferences", "", `{"classes":{"info":"immediate"}}`); w.Code != http.StatusBadRequest {

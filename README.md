@@ -4,7 +4,7 @@ The notification service of the DHBW Cloud self-service platform. Services repor
 
 ## Why one service
 
-Every service could send its own mails, and each would decide on its own when somebody has had enough. Then a person who manages three budgets and a project gets mail from three senders, each within its own limit, and none of them knows about the others. One service that receives every event can bundle, count, keep quiet hours and offer one settings page for all of it.
+Every service could send its own mails, and each would decide on its own when somebody has had enough. Then a person who manages three budgets and a project gets mail from three senders, each within its own limit, and none of them knows about the others. One service that receives every event can bundle, count and offer one settings page for all of it.
 
 ## The contract: `POST /v1/events`
 
@@ -27,8 +27,8 @@ Authenticated with a service token: `Authorization: Bearer <token>`. Each sendin
 | `resolve` | `true` closes the open event with this key: what of it has not gone out yet is dropped, no reminder follows, and the key may be used again. Needs only `type` and `key`. |
 | `recipients` | `user` = a mail address; `group` = a role-provider userset (`group:<id>` or `group:<id>#<relation>`), resolved to people through the role provider. Roles at objects (owners of a project, managers of a budget) the sender resolves itself into `user`s. Required unless `resolve`; at most 1000 entries. |
 | `actor` | The person whose action caused the event. Never notified about it. |
-| `due` | A deadline (RFC 3339). An event due within the next 48 hours is delivered during quiet hours too. |
-| `object` | What the event is about; `url` (http or https only) is the button in the mail. |
+| `due` | A deadline (RFC 3339). Shown in the texts where a type has no date of its own in `data`. |
+| `object` | What the event is about; `url` (http or https only) is the button in the mail. Without a `url` the service links the portal itself (`PORTAL_URL`): `/projects?project=<id>` for `kind: project`, `/projects?budget=<id>` for `kind: budget`, `/projects?node=<id>` for anything else of the budget tree. The portal opens these where the viewer sees the object (a project of their own in its area's list, anything else under Budgets), so senders can use the same form or leave `url` out. |
 | `data` | Free-form input for the texts (see below). |
 
 Answers: **202** for every valid event, with `{"status": "accepted" | "duplicate" | "resolved" | "nothing_to_resolve"}`; **400** for an invalid body (`{"error": "…"}`); **401** without a valid service token. Delivery happens asynchronously: a 202 means stored, not sent.
@@ -55,8 +55,7 @@ Every type also takes `data.text` as an extra paragraph. Text fields may be a st
 - **Reminders.** An `action` that has been delivered and is still open is reminded of after 2 and 7 days (`REMINDER_DAYS`), never more than twice, until an event with `resolve: true` and the same key arrives.
 - **Daily limit.** At most `DAILY_LIMIT` (5) immediate mails per person and calendar day; the rest goes into the summary.
 - **Own actions.** The `actor` never gets a notification about the event.
-- **Quiet hours.** By default 20:00–07:00 and the weekend (Europe/Berlin): immediate mails wait for the end, unless the event is due within the next 48 hours.
-- **Settings per person**: language, mode per class (action: immediate or summary; disruption: immediate, summary or off; info: summary or off), summary daily or weekly, quiet hours, and types unsubscribed from. Without settings: action and disruption at once, info weekly, quiet hours on.
+- **Settings per person**: language, mode per class (action: immediate or summary; disruption: immediate, summary or off; info: summary or off), summary daily or weekly, and types unsubscribed from. Without settings: action and disruption at once, info weekly.
 
 Every mail links to the settings page (`SETTINGS_URL`) and carries `List-Unsubscribe` with `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058) for its type; a summary's link switches the info class off. The link is a signed token (`UNSUBSCRIBE_SECRET`), works without signing in, and shows a confirmation page on GET; only a POST changes anything, so mail scanners following links unsubscribe nobody.
 
@@ -85,7 +84,7 @@ The OpenAPI description is served at `/swagger.json` (generated with swag, `make
 | `notify_messages_total{channel,kind}` | mails sent |
 | `notify_bundled_total{channel}` | notifications that rode in a mail with others of their type |
 | `notify_suppressed_total{reason}` | not delivered on purpose: duplicate, own_action, resolved, unsubscribed, off, no_recipient |
-| `notify_deferred_total{reason}` | held back (quiet_hours) or moved to the summary (daily_limit) |
+| `notify_deferred_total{reason}` | moved to the summary (daily_limit) |
 | `notify_failed_total{stage}` | send (one failed attempt), gave_up (after `MaxAttempts`), resolve (a group could not be resolved; the event waits) |
 | `notify_waiting{status}` | pending and digest notifications in the database |
 | `notify_last_pass_timestamp_seconds` | the delivery loop's last pass |
@@ -100,6 +99,7 @@ The OpenAPI description is served at `/swagger.json` (generated with swag, `make
 | `UNSUBSCRIBE_SECRET` | – | ≥ 32 characters (required); changing it invalidates every link sent so far |
 | `PUBLIC_URL` | – | where the unsubscribe links point (required) |
 | `SETTINGS_URL` | – | the portal's settings page |
+| `PORTAL_URL` | – | the portal, for links to objects sent without a `url` |
 | `MAIL_MODE` | `smtp` | `smtp`, or `log` (only logs what would be sent) |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_TLS` | –, `25`, `starttls` | `starttls` uses TLS when offered (and requires it with a login), `tls` is implicit TLS, `none` plain |
 | `SMTP_USERNAME`, `SMTP_PASSWORD` | – | optional login (PLAIN, only over TLS) |
@@ -107,7 +107,7 @@ The OpenAPI description is served at `/swagger.json` (generated with swag, `make
 | `ROLE_PROVIDER_URL`, `ROLE_PROVIDER_TOKEN` | – | group resolution (a resolve or read token there); without a URL, events naming a group wait |
 | `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_JWKS_URL` | – | the portal's sign-in; empty issuer leaves the person routes out |
 | `DEV_AUTH_USER` | – | development only (`API_MODE=development`, no OIDC): person requests without Authorization are this person |
-| `TIMEZONE`, `BUNDLE_COLLECT_SECONDS`, `BUNDLE_WINDOW_MINUTES`, `DAILY_LIMIT`, `URGENT_WITHIN_HOURS`, `REMINDER_DAYS`, `DIGEST_HOUR`, `RETENTION_DAYS`, `PASS_INTERVAL_SECONDS` | `Europe/Berlin`, 120, 15, 5, 48, `2,7`, 8, 90, 30 | the rules |
+| `TIMEZONE`, `BUNDLE_COLLECT_SECONDS`, `BUNDLE_WINDOW_MINUTES`, `DAILY_LIMIT`, `REMINDER_DAYS`, `DIGEST_HOUR`, `RETENTION_DAYS`, `PASS_INTERVAL_SECONDS` | `Europe/Berlin`, 120, 15, 5, `2,7`, 8, 90, 30 | the rules |
 | `API_BIND`, `METRICS_BIND`, `API_MODE`, `TRUSTED_PROXIES` | `:8087`, `:8088`, `production`, – | |
 
 Run one replica only: the delivery loop is not coordinated between pods (the chart's schema allows at most one, and the Deployment uses `Recreate`).

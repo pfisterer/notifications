@@ -105,6 +105,8 @@ spec:
               value: {{ $v.publicUrl | default (printf "https://%s" $v.hostname) | quote }}
             - name: SETTINGS_URL
               value: {{ $v.settingsUrl | quote }}
+            - name: PORTAL_URL
+              value: {{ $v.portalUrl | default "" | quote }}
             # ── Mail ─────────────────────────────────────────────────────────
             - name: MAIL_MODE
               value: {{ $v.mail.mode | quote }}
@@ -164,8 +166,6 @@ spec:
               value: {{ .bundleWindowMinutes | toString | quote }}
             - name: DAILY_LIMIT
               value: {{ .dailyLimit | toString | quote }}
-            - name: URGENT_WITHIN_HOURS
-              value: {{ .urgentWithinHours | toString | quote }}
             - name: REMINDER_DAYS
               value: {{ join "," .reminderDays | quote }}
             - name: DIGEST_HOUR

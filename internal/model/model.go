@@ -59,7 +59,7 @@ type EventRequest struct {
 	Recipients []Recipient `json:"recipients"`
 	// Actor is the person whose action caused the event; they are never notified about it.
 	Actor string `json:"actor,omitempty" example:"someone@example.edu"`
-	// Due is a deadline (RFC 3339). An action due within 48 hours is delivered during quiet hours too.
+	// Due is a deadline (RFC 3339); the texts show it where a type has no date of its own in data.
 	Due *time.Time `json:"due,omitempty" example:"2026-12-09T00:00:00Z"`
 	// Object is what the event is about.
 	Object Object `json:"object"`
@@ -160,14 +160,6 @@ const (
 	DigestWeekly Digest = "weekly"
 )
 
-// QuietHours hold back immediate mails: every night from Start to End (local time, "HH:MM") and, with Weekends, all of Saturday and Sunday. An action due within 48 hours is delivered anyway.
-type QuietHours struct {
-	Enabled  bool   `json:"enabled"`
-	Start    string `json:"start" example:"20:00"`
-	End      string `json:"end" example:"07:00"`
-	Weekends bool   `json:"weekends"`
-}
-
 // Preferences are one person's settings.
 type Preferences struct {
 	// Language of the mails, de or en.
@@ -175,19 +167,17 @@ type Preferences struct {
 	// Classes say per class whether it comes at once, in the summary or not at all. action: immediate or digest; disruption: immediate, digest or off; info: digest or off.
 	Classes map[Class]Mode `json:"classes"`
 	// Digest is how often the summary comes: daily or weekly (Mondays).
-	Digest     Digest     `json:"digest" example:"weekly" enums:"daily,weekly"`
-	QuietHours QuietHours `json:"quiet_hours"`
+	Digest Digest `json:"digest" example:"weekly" enums:"daily,weekly"`
 	// Unsubscribed lists the event types the person gets no mail about.
 	Unsubscribed []string `json:"unsubscribed"`
 }
 
-// DefaultPreferences are what applies to somebody who has saved none: action and disruption at once, info in a weekly summary, quiet at night and on weekends.
+// DefaultPreferences are what applies to somebody who has saved none: action and disruption at once, info in a weekly summary.
 func DefaultPreferences() Preferences {
 	return Preferences{
 		Language:     "de",
 		Classes:      map[Class]Mode{ClassAction: ModeImmediate, ClassDisruption: ModeImmediate, ClassInfo: ModeDigest},
 		Digest:       DigestWeekly,
-		QuietHours:   QuietHours{Enabled: true, Start: "20:00", End: "07:00", Weekends: true},
 		Unsubscribed: []string{},
 	}
 }
@@ -235,18 +225,6 @@ func (p *Preferences) Validate() error {
 	if p.Digest != DigestDaily && p.Digest != DigestWeekly {
 		return fmt.Errorf("digest must be daily or weekly")
 	}
-	if p.QuietHours.Start == "" {
-		p.QuietHours.Start = def.QuietHours.Start
-	}
-	if p.QuietHours.End == "" {
-		p.QuietHours.End = def.QuietHours.End
-	}
-	if _, err := ParseClock(p.QuietHours.Start); err != nil {
-		return fmt.Errorf("quiet_hours.start: %v", err)
-	}
-	if _, err := ParseClock(p.QuietHours.End); err != nil {
-		return fmt.Errorf("quiet_hours.end: %v", err)
-	}
 	if p.Unsubscribed == nil {
 		p.Unsubscribed = []string{}
 	}
@@ -276,12 +254,3 @@ func (p Preferences) ModeOf(c Class) Mode {
 
 // IsUnsubscribed says whether the person gets no mail about events of type t.
 func (p Preferences) IsUnsubscribed(t string) bool { return slices.Contains(p.Unsubscribed, t) }
-
-// ParseClock reads "HH:MM" as minutes after midnight.
-func ParseClock(s string) (int, error) {
-	t, err := time.Parse("15:04", s)
-	if err != nil {
-		return 0, fmt.Errorf("%q is not HH:MM", s)
-	}
-	return t.Hour()*60 + t.Minute(), nil
-}

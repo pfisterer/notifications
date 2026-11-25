@@ -1,4 +1,4 @@
-// Package engine decides whether, when and how an event reaches people: it takes events in, resolves their recipients, and delivers the notifications under the rules of Policy — at once (bundled per type, within a daily limit, outside quiet hours), in the summary, or not at all — and reminds of open actions.
+// Package engine decides whether, when and how an event reaches people: it takes events in, resolves their recipients, and delivers the notifications under the rules of Policy — at once (bundled per type, within a daily limit), in the summary, or not at all — and reminds of open actions.
 package engine
 
 import (
@@ -28,6 +28,24 @@ type Links struct {
 	SettingsURL string
 	// PublicURL is where this service is reached from outside, for the unsubscribe links (…/unsubscribe?token=…).
 	PublicURL string
+	// PortalURL is the self-service portal: an object sent without a url gets the portal's link to it (Complete).
+	PortalURL string
+}
+
+// Complete gives an object without a url the portal's address of it, which the portal sends on to where the viewer sees it: /projects?project=<id> for a project, /projects?budget=<id> for a budget, /projects?node=<id> for anything else of the budget tree (an allocation, a request). An object with a url, or without an id, stays as it is.
+func (l Links) Complete(o model.Object) model.Object {
+	if o.URL != "" || o.ID == "" || l.PortalURL == "" {
+		return o
+	}
+	param := "node"
+	switch o.Kind {
+	case "project":
+		param = "project"
+	case "budget":
+		param = "budget"
+	}
+	o.URL = strings.TrimRight(l.PortalURL, "/") + "/projects?" + param + "=" + url.QueryEscape(o.ID)
+	return o
 }
 
 // Engine is the service's core.
@@ -352,20 +370,10 @@ func (e *Engine) dispatchGroup(ctx context.Context, now time.Time, prefs model.P
 		return false, nil
 	}
 
-	urgent := false
 	oldest := immediate[0].CreatedAt
 	for _, n := range immediate {
-		if n.Event != nil && e.Policy.urgent(n.Event.Due, now) {
-			urgent = true
-		}
 		if n.CreatedAt.Before(oldest) {
 			oldest = n.CreatedAt
-		}
-	}
-	if !urgent {
-		if quiet, until := QuietUntil(now, prefs.QuietHours, e.Policy.Location); quiet {
-			e.Metrics.add(e.Metrics.Deferred, len(immediate), "quiet_hours")
-			return false, e.Store.HoldUntil(ctx, ids(immediate), until.UTC(), "quiet_hours")
 		}
 	}
 	// Bundling: wait a moment for more of the same, and after a mail of this type wait for the window to pass.
@@ -389,7 +397,7 @@ func (e *Engine) dispatchGroup(ctx context.Context, now time.Time, prefs model.P
 func (e *Engine) view(n store.Notification) texts.View {
 	v := texts.View{Type: n.Type, Reminder: n.Reminder, Loc: e.Policy.Location}
 	if n.Event != nil {
-		v.Object = n.Event.ObjectValue()
+		v.Object = e.Links.Complete(n.Event.ObjectValue())
 		v.Data = n.Event.DataValue()
 		v.Due = n.Event.Due
 	}
@@ -498,9 +506,6 @@ func (e *Engine) digests(ctx context.Context, force bool, only string) (int, err
 				ref = *last
 			}
 			if now.Before(NextDigestSlot(ref, cadence, e.Policy.DigestHour, e.Policy.Location)) {
-				continue
-			}
-			if quiet, _ := QuietUntil(now, prefs.QuietHours, e.Policy.Location); quiet {
 				continue
 			}
 		}

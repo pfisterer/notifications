@@ -36,6 +36,8 @@ notifications:
   publicUrl: ""
   # The portal's notification settings page, linked in every mail.
   settingsUrl: ""
+  # The portal: an object an event names without a url is linked as <portalUrl>/projects?project=<id> (budget=, node=), which the portal opens where the viewer sees it. Empty: no link.
+  portalUrl: ""
 
   mail:
     # smtp sends; log only writes what would be sent into the log.
@@ -75,7 +77,6 @@ notifications:
     bundleCollectSeconds: 120
     bundleWindowMinutes: 15
     dailyLimit: 5
-    urgentWithinHours: 48
     reminderDays: [2, 7]
     digestHour: 8
     retentionDays: 90
