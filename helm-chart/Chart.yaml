@@ -2,7 +2,7 @@ apiVersion: v2
 name: notifications
 description: Notification service of the DHBW cloud self-service platform (events in, mails out)
 type: application
-version: 0.1.0-test.2
-appVersion: "0.1.0-test.2"
+version: 0.1.0
+appVersion: "0.1.0"
 maintainers:
   - name: Dennis Pfisterer
