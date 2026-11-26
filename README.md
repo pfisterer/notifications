@@ -49,13 +49,13 @@ Every type also takes `data.text` as an extra paragraph. Text fields may be a st
 
 ## Rules
 
-- **Classes.** `action` and `disruption` go out at once, `info` only in the summary (weekly by default, Mondays at 8; daily if the person chooses). A summary that holds an action or disruption (see the daily limit) goes out at the next daily slot even for weekly readers.
+- **Classes.** `action` and `disruption` go out at once, `info` only in the summary (weekly by default, Mondays at 8; daily if the person chooses). Exception: a few types have a mode of their own (`GET /v1/types`: `modes`, `default_mode`); `approval.decided` is info by class but goes out at once by default, since it is the answer the person waits for. The person can collect it in the summary instead (preferences `types`), and it is off when info is off and nothing was chosen for it. A summary that holds an action or disruption (see the daily limit) goes out at the next daily slot even for weekly readers.
 - **Bundling.** An immediate notification waits `BUNDLE_COLLECT_SECONDS` (120) for more of its type for the same person; after a mail of a type, further ones of that type wait until `BUNDLE_WINDOW_MINUTES` (15) have passed and go out together ("3 requests await a decision").
 - **Duplicates.** Same token and key while the event is open: nothing new.
 - **Reminders.** An `action` that has been delivered and is still open is reminded of after 2 and 7 days (`REMINDER_DAYS`), never more than twice, until an event with `resolve: true` and the same key arrives.
 - **Daily limit.** At most `DAILY_LIMIT` (5) immediate mails per person and calendar day; the rest goes into the summary.
 - **Own actions.** The `actor` never gets a notification about the event.
-- **Settings per person**: language, mode per class (action: immediate or summary; disruption: immediate, summary or off; info: summary or off), summary daily or weekly, and types unsubscribed from. Without settings: action and disruption at once, info weekly.
+- **Settings per person**: language, mode per class (action: immediate or summary; disruption: immediate, summary or off; info: summary or off), summary daily or weekly, the own mode of the types that have one (`types`, e.g. `approval.decided`: immediate or summary), and types unsubscribed from. Without settings: action and disruption at once, `approval.decided` at once, other info weekly.
 
 Every mail links to the settings page (`SETTINGS_URL`) and carries `List-Unsubscribe` with `List-Unsubscribe-Post: List-Unsubscribe=One-Click` (RFC 8058) for its type; a summary's link switches the info class off. The link is a signed token (`UNSUBSCRIBE_SECRET`), works without signing in, and shows a confirmation page on GET; only a POST changes anything, so mail scanners following links unsubscribe nobody.
 

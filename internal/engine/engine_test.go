@@ -330,8 +330,19 @@ func TestDuplicatesAreSuppressed(t *testing.T) {
 	}
 }
 
+// collectDecisions saves preferences for who that put approval.decided into the summary, as a person may choose.
+func (h *harness) collectDecisions(who string) {
+	h.t.Helper()
+	p := model.DefaultPreferences()
+	p.Types["approval.decided"] = model.ModeDigest
+	if err := h.e.Store.SavePreferences(h.ctx, who, p, h.now); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
 func TestInfoOnlyInTheSummary(t *testing.T) {
 	h := newHarness(t, at(25, 10, 0)) // Wednesday
+	h.collectDecisions(alice)
 	r := action("approval.decided", "i1", alice)
 	r.Class = model.ClassInfo
 	r.Data = map[string]any{"decision": "approved", "decided_by": "admin@example.edu"}
@@ -358,8 +369,51 @@ func TestInfoOnlyInTheSummary(t *testing.T) {
 	h.wantMails(alice, 1)
 }
 
+// An info without a mode of its own stays in the summary by default; approval.decided comes at once unless the person collects it or has switched info off.
+func TestDecisionComesAtOnceOtherInfoWaits(t *testing.T) {
+	h := newHarness(t, at(25, 10, 0)) // Wednesday
+	d := action("approval.decided", "d1", alice)
+	d.Class = model.ClassInfo
+	d.Data = map[string]any{"decision": "approved", "decided_by": "admin@example.edu"}
+	h.post("os", d)
+	o := action("budget.created", "o1", alice)
+	o.Class = model.ClassInfo
+	h.post("os", o)
+	h.advance(h.e.Policy.BundleCollect)
+	h.pass()
+	ms := h.wantMails(alice, 1)
+	if !strings.Contains(ms[0].Subject, "Antrag genehmigt: Projekt d1") {
+		t.Errorf("subject %q", ms[0].Subject)
+	}
+	// The other info waits for Monday's summary.
+	h.setTime(at(30, 8, 0))
+	h.pass()
+	ms = h.wantMails(alice, 2)
+	if !strings.HasPrefix(ms[1].Subject, "Zusammenfassung: 1 Benachrichtigung") {
+		t.Errorf("summary %q", ms[1].Subject)
+	}
+
+	// Info switched off: no decision either, unless chosen for the type itself.
+	h2 := newHarness(t, at(25, 10, 0))
+	p := model.DefaultPreferences()
+	p.Classes[model.ClassInfo] = model.ModeOff
+	if err := h2.e.Store.SavePreferences(h2.ctx, bob, p, h2.now); err != nil {
+		t.Fatal(err)
+	}
+	d2 := action("approval.decided", "d2", bob)
+	d2.Class = model.ClassInfo
+	h2.post("os", d2)
+	h2.advance(h2.e.Policy.BundleCollect)
+	h2.pass()
+	h2.wantMails(bob, 0)
+	if h2.e.Metrics.Suppressed.Value("off") != 1 {
+		t.Errorf("off metric %v", h2.e.Metrics.Suppressed.Value("off"))
+	}
+}
+
 func TestSendDigestsNow(t *testing.T) {
 	h := newHarness(t, at(25, 10, 0))
+	h.collectDecisions(alice)
 	for i := range 2 {
 		r := action("approval.decided", fmt.Sprintf("s%d", i), alice)
 		r.Class = model.ClassInfo

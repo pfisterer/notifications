@@ -133,6 +133,10 @@ type TypeInfo struct {
 	Class string `json:"class" example:"action"`
 	// Name in the language of the request (Accept-Language).
 	Name string `json:"name" example:"Antrag wartet auf Entscheidung"`
+	// Modes are the modes the type may be set to on its own (preferences.types); absent when it follows its class.
+	Modes []string `json:"modes,omitempty"`
+	// DefaultMode is the type's own mode without a choice; absent when it follows its class.
+	DefaultMode string `json:"default_mode,omitempty"`
 }
 
 // TypesResponse lists the event types and the modes each class may be set to.
@@ -145,7 +149,7 @@ type TypesResponse struct {
 // getTypes godoc
 //
 //	@Summary		Event types
-//	@Description	The event types with a text of their own, for the settings page (unsubscribing per type), and the modes each class may be set to. Names in the language of Accept-Language.
+//	@Description	The event types with a text of their own, for the settings page (unsubscribing per type, and the own mode of the few types that have one, e.g. approval.decided), and the modes each class may be set to. Names in the language of Accept-Language.
 //	@Tags			preferences
 //	@Produce		json
 //	@Security		Bearer
@@ -155,7 +159,14 @@ func (h *handlers) getTypes(c *gin.Context) {
 	l := langOf(c)
 	out := TypesResponse{Modes: map[string][]string{}}
 	for _, k := range texts.Known() {
-		out.Types = append(out.Types, TypeInfo{Type: k.Type, Class: string(k.Class), Name: k.Name(l)})
+		ti := TypeInfo{Type: k.Type, Class: string(k.Class), Name: k.Name(l)}
+		for _, m := range model.TypeModes(k.Type) {
+			ti.Modes = append(ti.Modes, string(m))
+		}
+		if d, ok := model.TypeDefault(k.Type); ok {
+			ti.DefaultMode = string(d)
+		}
+		out.Types = append(out.Types, ti)
 	}
 	for _, cl := range model.Classes {
 		for _, m := range model.AllowedModes(cl) {

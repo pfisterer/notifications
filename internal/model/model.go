@@ -170,6 +170,8 @@ type Preferences struct {
 	Digest Digest `json:"digest" example:"weekly" enums:"daily,weekly"`
 	// Unsubscribed lists the event types the person gets no mail about.
 	Unsubscribed []string `json:"unsubscribed"`
+	// Types are the person's own choices for the event types that have a mode of their own (TypeModes), e.g. approval.decided: immediate or digest. Only explicit choices are kept; a type without an entry follows its default (TypeDefault) unless its class is switched off.
+	Types map[string]Mode `json:"types"`
 }
 
 // DefaultPreferences are what applies to somebody who has saved none: action and disruption at once, info in a weekly summary.
@@ -179,7 +181,23 @@ func DefaultPreferences() Preferences {
 		Classes:      map[Class]Mode{ClassAction: ModeImmediate, ClassDisruption: ModeImmediate, ClassInfo: ModeDigest},
 		Digest:       DigestWeekly,
 		Unsubscribed: []string{},
+		Types:        map[string]Mode{},
 	}
+}
+
+// typeModes are the event types that do not simply follow their class, with the modes they may be set to; typeDefaults is what applies without a choice. approval.decided is info by class, but for the person who asked it is the answer they wait for, so it comes at once unless they collect it (decided 26.11.2026).
+var (
+	typeModes    = map[string][]Mode{"approval.decided": {ModeImmediate, ModeDigest}}
+	typeDefaults = map[string]Mode{"approval.decided": ModeImmediate}
+)
+
+// TypeModes are the modes event type t may be set to on its own; nil when t follows its class.
+func TypeModes(t string) []Mode { return typeModes[t] }
+
+// TypeDefault is the mode of event type t when the person has not chosen one; ok is false when t follows its class.
+func TypeDefault(t string) (Mode, bool) {
+	m, ok := typeDefaults[t]
+	return m, ok
 }
 
 // allowedModes are the modes each class may be set to: an action cannot be switched off (only collected), an info never comes at once.
@@ -241,6 +259,18 @@ func (p *Preferences) Validate() error {
 		}
 	}
 	p.Unsubscribed = out
+	if p.Types == nil {
+		p.Types = map[string]Mode{}
+	}
+	for t, m := range p.Types {
+		allowed := typeModes[t]
+		if allowed == nil {
+			return fmt.Errorf("types: %q has no mode of its own", t)
+		}
+		if !slices.Contains(allowed, m) {
+			return fmt.Errorf("types: %s cannot be %q (allowed: %v)", t, m, allowed)
+		}
+	}
 	return nil
 }
 
@@ -250,6 +280,21 @@ func (p Preferences) ModeOf(c Class) Mode {
 		return m
 	}
 	return DefaultPreferences().Classes[c]
+}
+
+// ModeFor is the mode for a notification of event type t in class c: the person's own choice for t; else off when the class is off; else the type's default; else the class's mode.
+func (p Preferences) ModeFor(t string, c Class) Mode {
+	if m, ok := p.Types[t]; ok {
+		return m
+	}
+	cm := p.ModeOf(c)
+	if cm == ModeOff {
+		return ModeOff
+	}
+	if m, ok := typeDefaults[t]; ok {
+		return m
+	}
+	return cm
 }
 
 // IsUnsubscribed says whether the person gets no mail about events of type t.

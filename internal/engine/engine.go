@@ -351,7 +351,7 @@ func (e *Engine) dispatchGroup(ctx context.Context, now time.Time, prefs model.P
 		case prefs.IsUnsubscribed(n.Type):
 			unsubscribed = append(unsubscribed, n)
 		default:
-			switch prefs.ModeOf(model.Class(n.Class)) {
+			switch prefs.ModeFor(n.Type, model.Class(n.Class)) {
 			case model.ModeOff:
 				off = append(off, n)
 			case model.ModeDigest:
@@ -538,7 +538,7 @@ func (e *Engine) sendDigest(ctx context.Context, now time.Time, prefs model.Pref
 			resolved = append(resolved, n)
 		case prefs.IsUnsubscribed(n.Type):
 			unsubscribed = append(unsubscribed, n)
-		case prefs.ModeOf(model.Class(n.Class)) == model.ModeOff:
+		case prefs.ModeFor(n.Type, model.Class(n.Class)) == model.ModeOff:
 			off = append(off, n)
 		default:
 			keep = append(keep, n)

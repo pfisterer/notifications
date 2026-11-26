@@ -163,7 +163,8 @@ func TestUnknownTypeGetsTheGenericText(t *testing.T) {
 
 func TestAdminDigests(t *testing.T) {
 	v := newEnv(t)
-	body := `{"type":"approval.decided","key":"d1","class":"info","recipients":[{"user":"dana@example.edu"}],"data":{"decision":"rejected"}}`
+	// An info that follows its class waits for the summary (approval.decided would come at once).
+	body := `{"type":"budget.created","key":"b1","class":"info","recipients":[{"user":"dana@example.edu"}],"data":{"title":{"de":"Budget angelegt","en":"Budget created"},"text":"Das Budget Kurs X wurde angelegt."}}`
 	v.do("POST", "/v1/events", svcToken, body)
 	if w := v.do("POST", "/v1/admin/digests", "", `{}`); w.Code != http.StatusUnauthorized {
 		t.Errorf("without token: %d", w.Code)
@@ -172,7 +173,7 @@ func TestAdminDigests(t *testing.T) {
 	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"sent":1`) {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}
-	if ms := v.rec.Messages(); len(ms) != 1 || !strings.Contains(ms[0].Text, "Antrag abgelehnt") {
+	if ms := v.rec.Messages(); len(ms) != 1 || !strings.Contains(ms[0].Text, "Kurs X wurde angelegt") {
 		t.Fatalf("mails: %+v", ms)
 	}
 }
@@ -203,11 +204,20 @@ func TestPreferences(t *testing.T) {
 	if w := v.do("PUT", "/v1/preferences", "", `{"classes":{"action":"off"}}`); w.Code != http.StatusBadRequest {
 		t.Errorf("action off: %d", w.Code)
 	}
+	if w := v.do("PUT", "/v1/preferences", "", `{"types":{"approval.decided":"digest"}}`); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"approval.decided":"digest"`) {
+		t.Errorf("decision collected: %d %s", w.Code, w.Body)
+	}
+	if w := v.do("PUT", "/v1/preferences", "", `{"types":{"approval.waiting":"digest"}}`); w.Code != http.StatusBadRequest {
+		t.Errorf("type without own mode: %d", w.Code)
+	}
+	if w := v.do("PUT", "/v1/preferences", "", `{"types":{"approval.decided":"off"}}`); w.Code != http.StatusBadRequest {
+		t.Errorf("decision off: %d", w.Code)
+	}
 	if w := v.do("GET", "/v1/preferences", "", "", "X-Act-As", "someone@example.edu"); w.Code != http.StatusForbidden {
 		t.Errorf("act-as: %d", w.Code)
 	}
 	w = v.do("GET", "/v1/types", "", "", "Accept-Language", "en")
-	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"Allocation expired"`) || !strings.Contains(w.Body.String(), `"modes"`) {
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"Allocation expired"`) || !strings.Contains(w.Body.String(), `"modes"`) || !strings.Contains(w.Body.String(), `"default_mode":"immediate"`) {
 		t.Errorf("types: %d %s", w.Code, w.Body)
 	}
 }
