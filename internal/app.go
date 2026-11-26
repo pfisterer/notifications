@@ -19,9 +19,6 @@ import (
 	"github.com/pfisterer/notifications/internal/store"
 	"github.com/pfisterer/notifications/internal/unsub"
 	"github.com/pfisterer/notifications/internal/web"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
-	gormlogger "gorm.io/gorm/logger"
 )
 
 // Run starts the service and blocks until it is stopped.
@@ -35,7 +32,7 @@ func Run() {
 	defer log.Sync() //nolint:errcheck
 	log.Infow("Starting notifications", "mail_mode", cfg.MailMode, "senders", len(cfg.ServiceTokens))
 
-	db, err := openDB(cfg.DBConnectionString)
+	db, err := openDB(context.Background(), cfg.DBConnectionString, log)
 	if err != nil {
 		log.Fatalw("database", "error", err)
 	}
@@ -118,30 +115,6 @@ func Run() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = metricsSrv.Shutdown(shutdown)
-}
-
-func openDB(dsn string) (*gorm.DB, error) {
-	var db *gorm.DB
-	var err error
-	// The database may come up after this pod (a restart of both): try for a minute before giving up.
-	for i := range 12 {
-		db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{TranslateError: true, Logger: gormlogger.Default.LogMode(gormlogger.Warn)})
-		if err == nil {
-			sqlDB, derr := db.DB()
-			if derr == nil {
-				if perr := sqlDB.Ping(); perr == nil {
-					sqlDB.SetMaxOpenConns(10)
-					return db, nil
-				} else {
-					err = perr
-				}
-			}
-		}
-		if i < 11 {
-			time.Sleep(5 * time.Second)
-		}
-	}
-	return nil, err
 }
 
 // unresolvable is the resolver without a role provider: groups cannot be resolved, so such events wait.
